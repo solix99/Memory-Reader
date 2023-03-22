@@ -10,6 +10,7 @@
 #include <thread>
 #include <bitset>
 #include <winsock.h>
+#include <TlHelp32.h>
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -22,12 +23,6 @@ size_t READ_TYPE;
 enum READ_TYPE {
     BYTES,INTEGER
 }RT;
-
-
-ostream& operator <<(ostream& out,string_view str)
-{
-    return out;
-}
 
 
 bool IsUserAdmin()
@@ -100,8 +95,45 @@ bool IsUserAdmin()
 }
 
 
+int processSnapShot()
+{
+    // Create a snapshot of the system processes
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE)
+    {
+        std::cerr << "Failed to create process snapshot!" << std::endl;
+        return 1;
+    }
+
+    // Enumerate the processes and print their names and IDs
+    PROCESSENTRY32 pe32 = { 0 };
+    pe32.dwSize = sizeof(pe32);
+
+    if (!Process32First(hSnapshot, &pe32))
+    {
+        std::cerr << "Failed to get first process!" << std::endl;
+        CloseHandle(hSnapshot);
+        return 1;
+    }
+
+    do {
+        std::wstring wstr(pe32.szExeFile);
+        std::string str(wstr.begin(), wstr.end());
+        std::cout << "Process Name: " << str << std::endl;
+        std::cout << "Process ID: " << pe32.th32ProcessID << std::endl;
+        std::cout << std::endl;
+    } while (Process32Next(hSnapshot, &pe32));
+
+    // Close the process snapshot handle
+    CloseHandle(hSnapshot);
+
+    return 0;
+   
+}
+
 void readProcessMemory(HANDLE processHandle)
 {
+
     // Define the memory range to read
     SYSTEM_INFO sysInfo;
     GetSystemInfo(&sysInfo);
@@ -215,75 +247,6 @@ void readProcessMemory(HANDLE processHandle)
     cout << endl << vals;
 }
 
-
-
-        /*
-
-        LPVOID baseAddress = sysInfo.lpMinimumApplicationAddress;
-        LPVOID maxAddress = sysInfo.lpMaximumApplicationAddress;
-        while (baseAddress < maxAddress)
-        {
-            MEMORY_BASIC_INFORMATION memInfo;
-            if (VirtualQueryEx(processHandle, baseAddress, &memInfo, sizeof(memInfo)) == 0)
-            {
-                std::cerr << "Failed to query memory information. Error code: " << GetLastError() << std::endl;
-                // Failed to query the memory information, so break the loop
-                break;
-            }
-
-            // Only read memory blocks that are readable and not guard pages
-            if (memInfo.State == MEM_COMMIT && (memInfo.Protect & PAGE_GUARD) == 0 && (memInfo.Protect & PAGE_NOACCESS) == 0)
-            {
-                //Read in bytes
-                if (READ_TYPE == BYTES)
-                {
-
-                }
-                //Read in integer
-                if (READ_TYPE == INTEGER)
-                {
-                    // Check if the memory block is aligned to the size of an integer
-                    if (reinterpret_cast<uintptr_t>(memInfo.BaseAddress) % sizeof(int) != 0)
-                    {
-                        // Move to the next memory block
-                        baseAddress = reinterpret_cast<LPVOID>(reinterpret_cast<char*>(memInfo.BaseAddress) + memInfo.RegionSize);
-                        continue;
-                    }
-
-                    LPVOID buffer = VirtualAlloc(NULL, memInfo.RegionSize, MEM_COMMIT, PAGE_READWRITE);
-                    SIZE_T bytesRead;
-
-                    if (ReadProcessMemory(processHandle, baseAddress, buffer, memInfo.RegionSize, &bytesRead) == 0)
-                    {
-                        // Failed to read the memory block, so free the buffer and break the loop
-                        std::cerr << "Failed to read memory. Error code: " << GetLastError() << std::endl;
-                        VirtualFree(buffer, 0, MEM_RELEASE);
-                        break;
-                    }
-
-                    // Search for integer values in the memory block
-                    int* ptr = reinterpret_cast<int*>(buffer);
-                    for (int i = 0; i < (bytesRead / sizeof(int)); ++i, ++ptr)
-                    {
-                        int value = *ptr;
-                        if (value == 123451245)
-                        {
-                            cout << endl << "Found";
-                        }
-                        vals++;
-                    }
-
-                    // Free the buffer
-                    VirtualFree(buffer, 0, MEM_RELEASE);
-                }
-            }
-
-            // Move to the next memory block
-            baseAddress = reinterpret_cast<LPVOID>(reinterpret_cast<char*>(baseAddress) + memInfo.RegionSize);
-            baseAddress = (LPBYTE)baseAddress + pmc.PageFaultCount;
-        }
-        cout << endl << "Values Read:" << vals;
-        */
 int main()
 {
 
@@ -293,43 +256,16 @@ int main()
         return 1;
     }
 
-    cout << endl << "0=Binary Search";
-    cout << endl << "1=Integer Search";
+    processSnapShot();
 
-    HWND targetWindow;
     HANDLE processHandle;
-    HWND windowHandle;
     DWORD processId, bytesRead;
-    char buffer[256];
 
-    // Find the window by enumerating all windows
-    targetWindow = NULL;
-    EnumWindows([](HWND hWnd, LPARAM lParam) -> BOOL 
-        {
-        HWND* pTargetWindow = reinterpret_cast<HWND*>(lParam);
-        wchar_t title[256];
-        if (GetWindowTextW(hWnd, title, 256) > 0) 
-        {
-            if (wcsstr(title, L"test1") != nullptr) 
-            {
-                *pTargetWindow = hWnd;
-                return FALSE;
-            }
-        }
-        return TRUE;
-        }, reinterpret_cast<LPARAM>(&targetWindow));
+    //cout << endl << "0=Binary Search";
+    cout << endl << "Integer Search";
+    cout << endl << "Input process id:";
 
-    if (targetWindow == NULL) 
-    {
-        std::cerr << "Could not find target window" << std::endl;
-        return 1;
-    }
-
-    cin >> READ_TYPE;
-
-
-    // Get the process ID of the target program
-    GetWindowThreadProcessId(targetWindow, &processId);
+    cin >> processId;
 
     // Open a handle to the process
     processHandle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId);
