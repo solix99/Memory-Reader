@@ -24,6 +24,11 @@ enum READ_TYPE {
     BYTES,INTEGER
 }RT;
 
+struct PARAM{
+    int PROCESS_ID, TARGET_INT;
+
+}PRM;
+
 
 bool IsUserAdmin()
 {
@@ -119,8 +124,8 @@ int processSnapShot()
     do {
         std::wstring wstr(pe32.szExeFile);
         std::string str(wstr.begin(), wstr.end());
-        std::cout << "Process Name: " << str << std::endl;
-        std::cout << "Process ID: " << pe32.th32ProcessID << std::endl;
+        std::cout << std::endl << "Process Name: " << str;
+        std::cout << std::endl << "Process ID: " << pe32.th32ProcessID;
         std::cout << std::endl;
     } while (Process32Next(hSnapshot, &pe32));
 
@@ -203,7 +208,7 @@ void readProcessMemoryEx(HANDLE processHandle)
                 int* intValue = reinterpret_cast<int*>(&buffer[i]);
                 if (*intValue == targetValue)
                 {
-                    std::cout << "Found target value at address " << currentAddress << std::endl;
+                    std::cout << std::endl << "Found target value at address " << currentAddress;
                 }
                 vals++;
                 //cout << endl << *intValue;
@@ -219,22 +224,26 @@ void readProcessMemoryEx(HANDLE processHandle)
     }
     cout << endl << "Values:" << vals << " SIZE:" << totalMemoryRead / (pow(1024, 2));
 }
+
 void readProcessMemory(HANDLE processHandle)
 {
-    int vals{ 0 };
+    size_t matchFound{ 0 }, valFound{ 0 };
+
+    SYSTEM_INFO systemInfo;
+    GetSystemInfo(&systemInfo);
 
     PROCESS_MEMORY_COUNTERS pmc;
     if (GetProcessMemoryInfo(processHandle, &pmc, sizeof(pmc)))
     {
         LPVOID addressToRead = nullptr; // Initialize to nullptr
         SIZE_T totalBytesRead = 0; // Total number of bytes read so far
-        const int bufferSize = 1024; // Define the size of the buffer to read memory in chunks
+        const int bufferSize = 128; // Define the size of the buffer to read memory in chunks
         SIZE_T bytesToRead = bufferSize; // Number of bytes to read in each iteration
         LPVOID buffer = new char[bytesToRead]; // Allocate a buffer to store the memory read
-
         MEMORY_BASIC_INFORMATION mbi;
-        for (addressToRead = nullptr; ; addressToRead = (LPVOID)((DWORD_PTR)mbi.BaseAddress + mbi.RegionSize))
-        {
+
+            for (addressToRead = nullptr; addressToRead < systemInfo.lpMaximumApplicationAddress; addressToRead = (LPVOID)((DWORD_PTR)mbi.BaseAddress + mbi.RegionSize))
+            {
             // Call VirtualQueryEx to get information about the next memory region
             SIZE_T result = VirtualQueryEx(processHandle, addressToRead, &mbi, sizeof(mbi));
             if (result == 0)
@@ -260,15 +269,20 @@ void readProcessMemory(HANDLE processHandle)
 
                 if (success)
                 {
-                    // Print the memory read to the console in hexadecimal format
-                    for (int i = 0; i < bytesToRead; i++)
+                    // Print the memory read as integers
+                    int* intBuffer = (int*)buffer;
+                    for (int i = 0; i < bytesToRead / sizeof(int); i++)
                     {
-                        //std::cout << (int)(&buffer)[i]  << " ";
+                        //std::cout << intBuffer[i] << " ";
+                        if (intBuffer[i] == PRM.TARGET_INT)
+                        {
+                            cout<<endl<< intBuffer[i] << " found at: " << (LPVOID)((DWORD_PTR)mbi.BaseAddress + offset + bytesToRead);
+                            matchFound++;
+                        }
+                        valFound++;
                     }
-                    //std::cout << std::endl;
-
                     totalBytesRead += bytesToRead; // Update the total number of bytes read so far
-                    vals++;
+                    cout << endl << bytesToRead;
                 }
                 else
                 {
@@ -278,6 +292,12 @@ void readProcessMemory(HANDLE processHandle)
                         // Move the address to read to the next readable address
                         addressToRead = (LPVOID)((DWORD_PTR)mbi.BaseAddress + offset + bytesToRead);
                     }
+                    else if (addressToRead >= systemInfo.lpMaximumApplicationAddress)
+                    {
+						// We have reached the end of the address space
+                        cout << endl << "MEM END";
+						break;
+					}
                     else
                     {
                         std::cerr << "Failed to read memory. Error code: " << lastError << std::endl;
@@ -287,7 +307,9 @@ void readProcessMemory(HANDLE processHandle)
             }
         }
 
-        std::cout << "Total memory read: " << totalBytesRead/(1024*1024) << " bytes." << " Values:" << vals << std::endl;
+        std::cout << "Total memory read: " << totalBytesRead/(1024*1024) << " Mbytes." << std::endl;
+        std::cout << "Total values read: " << valFound << " values." << std::endl;
+        std::cout << "Total matches found: " << matchFound << " times." << std::endl;
 
         delete[] buffer; // Free the memory allocated for the buffer
     }
@@ -296,7 +318,6 @@ void readProcessMemory(HANDLE processHandle)
         std::cerr << "Failed to get process memory info. Error code: " << GetLastError() << std::endl;
     }
 }
-
 
 int main()
 {
@@ -316,12 +337,14 @@ int main()
     cout << endl << "Integer Search";
     cout << endl << "Input process id:";
 
-    cin >> processId;
+    cin >> PRM.PROCESS_ID;
+
+    cout << endl << "Input target integer:";
+
+    cin >> PRM.TARGET_INT;
 
     // Open a handle to the process
-    processHandle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId);
-
-    cout << endl << processHandle << endl << processId;
+    processHandle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, PRM.PROCESS_ID);
 
     readProcessMemory(processHandle);
 
