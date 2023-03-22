@@ -137,7 +137,7 @@ void readProcessMemory(HANDLE processHandle)
     // Define the memory range to read
     SYSTEM_INFO sysInfo;
     GetSystemInfo(&sysInfo);
-    SIZE_T bytesRead, vals{ 0 };
+    SIZE_T vals{ 0 };
 
     PROCESS_MEMORY_COUNTERS_EX pmc_ex;
     PROCESS_MEMORY_COUNTERS pmc;
@@ -158,93 +158,62 @@ void readProcessMemory(HANDLE processHandle)
     double memUsageInMB = static_cast<double>(virtualMemUsedByProcess) / (1024 * 1024);
     std::cout << endl << "Process Memory Usage: " << memUsageInMB << " MB" << std::endl;
 
-    int targetValue = 123451245;
+    int targetValue = 98679567;
+    int totalMemoryRead{ 0 };
 
     MEMORY_BASIC_INFORMATION mbi = { 0 };
     LPVOID baseAddress = nullptr;
     LPVOID maxAddress = nullptr;
+    LPVOID currentAddress = sysInfo.lpMinimumApplicationAddress;
 
-    while (baseAddress < sysInfo.lpMaximumApplicationAddress)
+    SIZE_T bytesRead = 0;
+    SIZE_T bytesReturned{ 0 };
+
+    while (currentAddress < sysInfo.lpMaximumApplicationAddress)
     {
-        // Query the memory region
-        if (VirtualQueryEx(processHandle, baseAddress, &mbi, sizeof(mbi)) == 0)
+        MEMORY_BASIC_INFORMATION mbi;
+        bytesReturned = VirtualQuery(currentAddress, &mbi, sizeof(mbi));
+        if (bytesReturned == 0)
         {
-            std::cerr<<endl << "VirtualQueryEx failed with error code " << GetLastError() << std::endl;
+            // Failed to query memory information
+            std::cerr << "VirtualQuery failed with error code " << GetLastError() << std::endl;
             break;
         }
 
-        // Check if the memory region is accessible
-        if (mbi.Protect == PAGE_NOACCESS)
+        if (mbi.State == MEM_COMMIT && mbi.Protect != PAGE_NOACCESS)
         {
-            SIZE_T regionSize = mbi.RegionSize;
-            LPVOID regionAddress = VirtualAlloc(nullptr, regionSize, MEM_COMMIT, PAGE_READWRITE);
-            if (!regionAddress)
+            // This memory region is committed and accessible, so we can read it
+            char* buffer = new char[mbi.RegionSize];
+
+            if (ReadProcessMemory(GetCurrentProcess(), currentAddress, buffer, mbi.RegionSize, &bytesRead) == 0)
             {
-                std::cerr << endl << "VirtualAlloc failed with error code " << GetLastError() << std::endl;
+                // Failed to read process memory
+                std::cerr << "ReadProcessMemory failed with error code " << GetLastError() << std::endl;
+                delete[] buffer;
                 break;
             }
 
-            char* buffer = new char[mbi.RegionSize];
-            if (ReadProcessMemory(processHandle, baseAddress, buffer, mbi.RegionSize, &bytesRead) == 0)
-            {
-                std::cerr << "ReadProcessMemory failed with error code " << GetLastError() << std::endl;
-                delete[] buffer;
+            totalMemoryRead += bytesRead;
 
-                // Move to the next memory region
-                baseAddress = static_cast<char*>(mbi.BaseAddress) + mbi.RegionSize;
-                continue;
+            // Scan for integers in the memory region
+            for (size_t i = 0; i < bytesRead; i += sizeof(int))
+            {
+                int* intValue = reinterpret_cast<int*>(&buffer[i]);
+                if (*intValue == targetValue)
+                {
+                    std::cout << "Found target value at address " << currentAddress << std::endl;
+                }
+                vals++;
             }
 
-            // Update mbi to point to the newly allocated memory
-            mbi.BaseAddress = regionAddress;
-            mbi.Protect = PAGE_READWRITE;
-            mbi.RegionSize = regionSize;
-        }
-
-        // Read the memory region
-        char* buffer = nullptr;
-        SIZE_T bufferSize = 0;
-        if (mbi.RegionSize > 1024 * 1024)
-        {
-            // Allocate a buffer for large memory regions
-            bufferSize = 1024 * 1024;
-        }
-        else
-        {
-            bufferSize = mbi.RegionSize;
-        }
-        buffer = new char[bufferSize];
-
-
-        if (ReadProcessMemory(processHandle, baseAddress, buffer, mbi.RegionSize, &bytesRead) == 0)
-        {
-            std::cerr << endl << "ReadProcessMemory failed with error code " << GetLastError() << std::endl;
+            // Free the buffer memory
             delete[] buffer;
-            break;
-        }
-        // Scan for integers in the memory region
-        for (size_t i = 0; i < mbi.RegionSize; i += sizeof(int))
-        {
-            int* intValue = reinterpret_cast<int*>(&buffer[i]);
-            if (*intValue == targetValue)
-            {
-                std::cout << endl << "Found target value at address " << baseAddress << std::endl;
-
-            }
-            //cout << endl << *intValue;
-            ++vals;
-        }
-        // Free the allocated memory, if necessary
-        if (mbi.Protect == PAGE_READWRITE)
-        {
-            VirtualFree(mbi.BaseAddress, 0, MEM_RELEASE);
         }
 
-        delete[] buffer;
-        baseAddress = static_cast<char*>(mbi.BaseAddress) + mbi.RegionSize;
+        // Move to the next memory region
+        currentAddress = static_cast<char*>(mbi.BaseAddress) + mbi.RegionSize;
     }
-    
-    cout << endl << vals;
+    cout << endl <<"Values:" << vals << " SIZE:" << totalMemoryRead/(pow(1024,2));
 }
 
 int main()
