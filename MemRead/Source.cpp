@@ -152,12 +152,15 @@ void readProcessMemory(HANDLE processHandle)
                 break;
             }
 
-            // Copy the inaccessible region to the newly allocated memory
-            if (!ReadProcessMemory(processHandle, baseAddress, regionAddress, regionSize, &bytesRead))
+            char* buffer = new char[mbi.RegionSize];
+            if (ReadProcessMemory(processHandle, baseAddress, buffer, mbi.RegionSize, &bytesRead) == 0)
             {
-                std::cerr << endl << "ReadProcessMemory failed with error code " << GetLastError() << std::endl;
-                VirtualFree(regionAddress, 0, MEM_RELEASE);
-                break;
+                std::cerr << "ReadProcessMemory failed with error code " << GetLastError() << std::endl;
+                delete[] buffer;
+
+                // Move to the next memory region
+                baseAddress = static_cast<char*>(mbi.BaseAddress) + mbi.RegionSize;
+                continue;
             }
 
             // Update mbi to point to the newly allocated memory
