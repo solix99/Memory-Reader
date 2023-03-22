@@ -130,8 +130,7 @@ int processSnapShot()
     return 0;
    
 }
-
-void readProcessMemory(HANDLE processHandle)
+void readProcessMemoryEx(HANDLE processHandle)
 {
 
     // Define the memory range to read
@@ -158,7 +157,7 @@ void readProcessMemory(HANDLE processHandle)
     double memUsageInMB = static_cast<double>(virtualMemUsedByProcess) / (1024 * 1024);
     std::cout << endl << "Process Memory Usage: " << memUsageInMB << " MB" << std::endl;
 
-    int targetValue = 98679567;
+    int targetValue = 15500;
     int totalMemoryRead{ 0 };
 
     MEMORY_BASIC_INFORMATION mbi = { 0 };
@@ -168,6 +167,8 @@ void readProcessMemory(HANDLE processHandle)
 
     SIZE_T bytesRead = 0;
     SIZE_T bytesReturned{ 0 };
+    SIZE_T MAX_BUFFER{ INT_MAX/100 };
+
 
     while (currentAddress < sysInfo.lpMaximumApplicationAddress)
     {
@@ -180,12 +181,12 @@ void readProcessMemory(HANDLE processHandle)
             break;
         }
 
-        if (mbi.State == MEM_COMMIT && mbi.Protect != PAGE_NOACCESS)
+        if (mbi.Protect != PAGE_NOACCESS)
         {
             // This memory region is committed and accessible, so we can read it
-            char* buffer = new char[mbi.RegionSize];
+            char* buffer = new char[MAX_BUFFER];
 
-            if (ReadProcessMemory(GetCurrentProcess(), currentAddress, buffer, mbi.RegionSize, &bytesRead) == 0)
+            if (ReadProcessMemory(GetCurrentProcess(), currentAddress, buffer, mbi.RegionSize*sizeof(int), &bytesRead) == 0)
             {
                 // Failed to read process memory
                 std::cerr << "ReadProcessMemory failed with error code " << GetLastError() << std::endl;
@@ -193,6 +194,7 @@ void readProcessMemory(HANDLE processHandle)
                 break;
             }
 
+            cout << endl << bytesRead << " " << mbi.RegionSize;
             totalMemoryRead += bytesRead;
 
             // Scan for integers in the memory region
@@ -204,6 +206,8 @@ void readProcessMemory(HANDLE processHandle)
                     std::cout << "Found target value at address " << currentAddress << std::endl;
                 }
                 vals++;
+                //cout << endl << *intValue;
+
             }
 
             // Free the buffer memory
@@ -213,15 +217,93 @@ void readProcessMemory(HANDLE processHandle)
         // Move to the next memory region
         currentAddress = static_cast<char*>(mbi.BaseAddress) + mbi.RegionSize;
     }
-    cout << endl <<"Values:" << vals << " SIZE:" << totalMemoryRead/(pow(1024,2));
+    cout << endl << "Values:" << vals << " SIZE:" << totalMemoryRead / (pow(1024, 2));
 }
+void readProcessMemory(HANDLE processHandle)
+{
+    int vals{ 0 };
+
+    PROCESS_MEMORY_COUNTERS pmc;
+    if (GetProcessMemoryInfo(processHandle, &pmc, sizeof(pmc)))
+    {
+        LPVOID addressToRead = nullptr; // Initialize to nullptr
+        SIZE_T totalBytesRead = 0; // Total number of bytes read so far
+        const int bufferSize = 1024; // Define the size of the buffer to read memory in chunks
+        SIZE_T bytesToRead = bufferSize; // Number of bytes to read in each iteration
+        LPVOID buffer = new char[bytesToRead]; // Allocate a buffer to store the memory read
+
+        MEMORY_BASIC_INFORMATION mbi;
+        for (addressToRead = nullptr; ; addressToRead = (LPVOID)((DWORD_PTR)mbi.BaseAddress + mbi.RegionSize))
+        {
+            // Call VirtualQueryEx to get information about the next memory region
+            SIZE_T result = VirtualQueryEx(processHandle, addressToRead, &mbi, sizeof(mbi));
+            if (result == 0)
+            {
+                std::cerr << "Failed to query memory. Error code: " << GetLastError() << std::endl;
+                break;
+            }
+            if (mbi.State != MEM_COMMIT)
+            {
+                continue;
+            }
+
+            // Read memory in chunks
+            for (SIZE_T offset = 0; offset < mbi.RegionSize; offset += bytesToRead)
+            {
+                if (offset + bytesToRead > mbi.RegionSize)
+                {
+                    bytesToRead = mbi.RegionSize - offset;
+                }
+
+                // Call the ReadProcessMemory function to read the memory
+                BOOL success = ReadProcessMemory(processHandle, (LPVOID)((DWORD_PTR)mbi.BaseAddress + offset), buffer, bytesToRead, nullptr);
+
+                if (success)
+                {
+                    // Print the memory read to the console in hexadecimal format
+                    for (int i = 0; i < bytesToRead; i++)
+                    {
+                        //std::cout << (int)(&buffer)[i]  << " ";
+                    }
+                    //std::cout << std::endl;
+
+                    totalBytesRead += bytesToRead; // Update the total number of bytes read so far
+                    vals++;
+                }
+                else
+                {
+                    DWORD lastError = GetLastError();
+                    if (lastError == ERROR_PARTIAL_COPY)
+                    {
+                        // Move the address to read to the next readable address
+                        addressToRead = (LPVOID)((DWORD_PTR)mbi.BaseAddress + offset + bytesToRead);
+                    }
+                    else
+                    {
+                        std::cerr << "Failed to read memory. Error code: " << lastError << std::endl;
+                        break;
+                    }
+                }
+            }
+        }
+
+        std::cout << "Total memory read: " << totalBytesRead/(1024*1024) << " bytes." << " Values:" << vals << std::endl;
+
+        delete[] buffer; // Free the memory allocated for the buffer
+    }
+    else
+    {
+        std::cerr << "Failed to get process memory info. Error code: " << GetLastError() << std::endl;
+    }
+}
+
 
 int main()
 {
 
     if (!IsUserAdmin())
     {
-        cout << endl << "No admin privilages";
+        cout << endl << "No admin privileges";
         return 1;
     }
 
