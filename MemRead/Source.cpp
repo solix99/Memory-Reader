@@ -30,6 +30,8 @@ struct PARAM{
 }PRM;
 
 
+//this is master branch work
+
 bool IsUserAdmin()
 {
     HANDLE tokenHandle;
