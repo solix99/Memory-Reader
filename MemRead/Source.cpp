@@ -28,7 +28,7 @@ struct PARAM{
     int PROCESS_ID, TARGET_INT;
 
 }PRM;
-//modified
+
 
 bool IsUserAdmin()
 {
